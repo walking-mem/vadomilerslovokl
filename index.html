@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; -webkit-tap-highlight-color: transparent; }
+        body { background: #000; display: flex; justify-content: center; align-items: center; min-height: 100vh; touch-action: none; }
+        canvas { display: block; margin: 0 auto; background: linear-gradient(180deg, #87CEEB 0%, #E0F6FF 100%); cursor: pointer; }
+        #ui { position: fixed; top: 10px; left: 0; right: 0; text-align: center; color: white; font-family: monospace; font-size: 20px; text-shadow: 2px 2px 0 #000; pointer-events: none; z-index: 10; }
+        #score { background: rgba(0,0,0,0.6); display: inline-block; padding: 5px 15px; border-radius: 20px; }
+        #controls-note { position: fixed; bottom: 10px; left: 0; right: 0; text-align: center; color: rgba(255,255,255,0.5); font-size: 12px; font-family: monospace; }
+    </style>
+</head>
+<body>
+<div id="ui"><div id="score">СЧЕТ: 0</div></div>
+<canvas id="gameCanvas" width="360" height="600"></canvas>
+<div id="controls-note">← → на ПК | наклон телефона или тап по краям</div>
+
+<script>
+    const tg = window.Telegram.WebApp;
+    tg.expand();
+    tg.enableClosingConfirmation();
+    
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    // Размеры
+    const W = 360, H = 600;
+    canvas.width = W;
+    canvas.height = H;
+    
+    // Игровые объекты
+    let player = { x: W/2, y: H-100, width: 20, height: 20, vy: 0, radius: 10 };
+    let platforms = [];
+    let score = 0;
+    let gameOver = false;
+    let cameraY = 0;
+    let lastTimestamp = 0;
+    
+    // Управление
+    let moveLeft = false, moveRight = false;
+    let playerSpeed = 3;
+    
+    // Настройки
+    const GRAVITY = 0.5;
+    const JUMP_POWER = -10;
+    
+    // Создание платформ
+    function createPlatform(x, y, width=60) {
+        return { x: x, y: y, width: width, height: 12, color: '#8B5A2B' };
+    }
+    
+    function initGame() {
+        player = { x: W/2, y: H-100, width: 20, height: 20, vy: 0, radius: 10 };
+        score = 0;
+        gameOver = false;
+        cameraY = 0;
+        document.getElementById('score').innerText = 'СЧЕТ: 0';
+        
+        platforms = [];
+        // Стартовые платформы
+        for(let i = 0; i < 6; i++) {
+            let x = 20 + Math.random() * (W - 80);
+            let y = H - 50 - i * 80;
+            platforms.push(createPlatform(x, y, 50 + Math.random() * 40));
+        }
+    }
+    
+    // Обновление камеры
+    function updateCamera() {
+        if(player.y - cameraY < H * 0.3) {
+            cameraY = player.y - H * 0.3;
+        }
+        if(player.y - cameraY > H - 50) {
+            cameraY = player.y - H + 50;
+        }
+        if(cameraY < 0) cameraY = 0;
+    }
+    
+    // Физика и столкновения
+    function updateGame() {
+        if(gameOver) return;
+        
+        // Горизонтальное движение
+        if(moveLeft) player.x -= playerSpeed;
+        if(moveRight) player.x += playerSpeed;
+        player.x = Math.max(player.radius, Math.min(W - player.radius, player.x));
+        
+        // Гравитация
+        player.vy += GRAVITY;
+        player.y += player.vy;
+        
+        let onPlatform = false;
+        for(let p of platforms) {
+            let worldY = p.y - cameraY;
+            if(player.vy >= 0 && 
+               player.y + player.radius >= worldY && 
+               player.y - player.radius <= worldY + p.height &&
+               player.x + player.radius > p.x && 
+               player.x - player.radius < p.x + p.width) {
+                
+                player.y = worldY - player.radius;
+                player.vy = JUMP_POWER;
+                onPlatform = true;
+                
+                // Очки за новую платформу
+                if(p.y < cameraY + H) {
+                    score++;
+                    document.getElementById('score').innerText = `СЧЕТ: ${score}`;
+                    p.y = -100; // убираем, чтобы не давало бесконечно
+                }
+                break;
+            }
+        }
+        
+        // Если упал
+        if(player.y - player.radius > H) {
+            gameOver = true;
+            tg.sendData(JSON.stringify({ score: score, game_over: true }));
+            return;
+        }
+        
+        // Генерация платформ сверху
+        let highestPlatformY = Math.min(...platforms.map(p => p.y));
+        while(highestPlatformY > cameraY - 200) {
+            let newY = highestPlatformY - 80;
+            let newX = 20 + Math.random() * (W - 80);
+            platforms.push(createPlatform(newX, newY, 50 + Math.random() * 50));
+            highestPlatformY = newY;
+        }
+        
+        // Удаление ушедших вниз
+        platforms = platforms.filter(p => p.y > cameraY - 300);
+        
+        updateCamera();
+    }
+    
+    // Отрисовка
+    function draw() {
+        ctx.clearRect(0, 0, W, H);
+        
+        // Небо градиент
+        let grad = ctx.createLinearGradient(0, 0, 0, H);
+        grad.addColorStop(0, '#87CEEB');
+        grad.addColorStop(1, '#E0F6FF');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, W, H);
+        
+        // Платформы
+        for(let p of platforms) {
+            let y = p.y - cameraY;
+            if(y > H || y + p.height < 0) continue;
+            ctx.fillStyle = p.color;
+            ctx.shadowBlur = 4;
+            ctx.fillRect(p.x, y, p.width, p.height);
+            ctx.fillStyle = '#5D3A1A';
+            ctx.fillRect(p.x, y, p.width, 3);
+        }
+        ctx.shadowBlur = 0;
+        
+        // Игрок (круглый)
+        ctx.fillStyle = '#FF4444';
+        ctx.beginPath();
+        ctx.arc(player.x, player.y, player.radius, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = 'white';
+        ctx.beginPath();
+        ctx.arc(player.x-3, player.y-3, 2, 0, Math.PI*2);
+        ctx.fill();
+        
+        // Тень игрока
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.beginPath();
+        ctx.ellipse(player.x, player.y+5, player.radius-2, 4, 0, 0, Math.PI*2);
+        ctx.fill();
+        
+        if(gameOver) {
+            ctx.font = 'bold 24px monospace';
+            ctx.fillStyle = 'black';
+            ctx.shadowBlur = 0;
+            ctx.fillText('GAME OVER', W/2-80, H/2);
+            ctx.font = '16px monospace';
+            ctx.fillStyle = 'white';
+            ctx.fillText('Нажмите "Закрыть" и /start заново', W/2-130, H/2+40);
+        }
+    }
+    
+    // Управление с клавиатуры (ПК)
+    window.addEventListener('keydown', (e) => {
+        if(e.key === 'ArrowLeft') moveLeft = true;
+        if(e.key === 'ArrowRight') moveRight = true;
+    });
+    window.addEventListener('keyup', (e) => {
+        if(e.key === 'ArrowLeft') moveLeft = false;
+        if(e.key === 'ArrowRight') moveRight = false;
+    });
+    
+    // Управление касанием (телефон)
+    canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        let rect = canvas.getBoundingClientRect();
+        let touchX = (e.touches[0].clientX - rect.left) * (W / rect.width);
+        if(touchX < W/2) moveLeft = true;
+        else moveRight = true;
+    });
+    canvas.addEventListener('touchend', () => {
+        moveLeft = false;
+        moveRight = false;
+    });
+    
+    // Гироскоп (наклон)
+    function requestOrientation() {
+        if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+            // iOS
+            canvas.addEventListener('click', () => {
+                DeviceOrientationEvent.requestPermission()
+                    .then(response => {
+                        if (response === 'granted') {
+                            window.addEventListener('deviceorientation', handleOrientation);
+                        }
+                    })
+                    .catch(console.error);
+            });
+        } else {
+            window.addEventListener('deviceorientation', handleOrientation);
+        }
+    }
+    
+    function handleOrientation(e) {
+        let gamma = e.gamma; // -90..90
+        if(gamma) {
+            let speed = gamma / 20; // примерно от -4 до 4
+            player.x += speed;
+            player.x = Math.max(player.radius, Math.min(W - player.radius, player.x));
+        }
+    }
+    
+    requestOrientation();
+    
+    // Анимация
+    function gameLoop() {
+        updateGame();
+        draw();
+        requestAnimationFrame(gameLoop);
+    }
+    
+    initGame();
+    gameLoop();
+    
+    // Сообщаем Telegram, что приложение готово
+    tg.ready();
+</script>
+</body>
+</html>
