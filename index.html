@@ -1,255 +1,539 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
+    <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <title>vadomilerslovokl</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; -webkit-tap-highlight-color: transparent; }
-        body { background: #000; display: flex; justify-content: center; align-items: center; min-height: 100vh; touch-action: none; }
-        canvas { display: block; margin: 0 auto; background: linear-gradient(180deg, #87CEEB 0%, #E0F6FF 100%); cursor: pointer; }
-        #ui { position: fixed; top: 10px; left: 0; right: 0; text-align: center; color: white; font-family: monospace; font-size: 20px; text-shadow: 2px 2px 0 #000; pointer-events: none; z-index: 10; }
-        #score { background: rgba(0,0,0,0.6); display: inline-block; padding: 5px 15px; border-radius: 20px; }
-        #controls-note { position: fixed; bottom: 10px; left: 0; right: 0; text-align: center; color: rgba(255,255,255,0.5); font-size: 12px; font-family: monospace; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background: #0a0f2a;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: monospace;
+            touch-action: none;
+        }
+
+        .game-container {
+            position: relative;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+        }
+
+        canvas {
+            display: block;
+            background: radial-gradient(circle at 20% 30%, #87CEEB, #2c3e6e);
+            cursor: pointer;
+        }
+
+        .controls {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            pointer-events: none;
+        }
+
+        .btn-restart {
+            pointer-events: auto;
+            background: #ff9800;
+            border: none;
+            color: white;
+            font-weight: bold;
+            font-size: 1rem;
+            padding: 8px 20px;
+            border-radius: 40px;
+            font-family: monospace;
+            box-shadow: 0 3px 0 #b45f06;
+            cursor: pointer;
+        }
+        .btn-restart:active {
+            transform: translateY(2px);
+            box-shadow: 0 1px 0 #b45f06;
+        }
+
+        .score-panel {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(4px);
+            padding: 5px 14px;
+            border-radius: 30px;
+            color: white;
+            font-weight: bold;
+            font-size: 1.2rem;
+            pointer-events: none;
+        }
+
+        .crystal-score {
+            position: absolute;
+            top: 12px;
+            left: 160px;
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(4px);
+            padding: 5px 14px;
+            border-radius: 30px;
+            color: #ffd966;
+            font-weight: bold;
+            font-size: 1rem;
+            pointer-events: none;
+        }
+
+        .best-score {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(4px);
+            padding: 5px 14px;
+            border-radius: 30px;
+            color: gold;
+            font-weight: bold;
+            font-size: 0.9rem;
+            pointer-events: none;
+        }
+
+        @media (max-width: 500px) {
+            .score-panel { font-size: 1rem; top: 8px; left: 8px; padding: 3px 12px;}
+            .crystal-score { font-size: 0.8rem; top: 8px; left: 140px; padding: 3px 12px;}
+            .best-score { font-size: 0.8rem; top: 8px; right: 8px; padding: 3px 12px;}
+            .btn-restart { padding: 6px 16px; font-size: 0.8rem;}
+        }
     </style>
 </head>
 <body>
-<div id="ui"><div id="score">СЧЕТ: 0</div></div>
-<canvas id="gameCanvas" width="360" height="600"></canvas>
-<div id="controls-note">← → на ПК | наклон телефона или тап по краям</div>
+<div>
+    <div class="game-container">
+        <canvas id="gameCanvas" width="400" height="600"></canvas>
+        <div class="controls">
+            <button class="btn-restart" id="restartButton">НАЧАТЬ ЗАНОВО</button>
+        </div>
+    </div>
+    <div class="score-panel" id="scoreDisplay">СЧЕТ: 0</div>
+    <div class="crystal-score" id="crystalDisplay">КРИСТАЛЛЫ: 0</div>
+    <div class="best-score" id="bestDisplay">РЕКОРД: 0</div>
+</div>
 
 <script>
-    const tg = window.Telegram.WebApp;
-    tg.expand();
-    tg.enableClosingConfirmation();
-    
-    const canvas = document.getElementById('gameCanvas');
-    const ctx = canvas.getContext('2d');
-    
-    // Размеры
-    const W = 360, H = 600;
-    canvas.width = W;
-    canvas.height = H;
-    
-    // Игровые объекты
-    let player = { x: W/2, y: H-100, width: 20, height: 20, vy: 0, radius: 10 };
-    let platforms = [];
-    let score = 0;
-    let gameOver = false;
-    let cameraY = 0;
-    let lastTimestamp = 0;
-    
-    // Управление
-    let moveLeft = false, moveRight = false;
-    let playerSpeed = 3;
-    
-    // Настройки
-    const GRAVITY = 0.5;
-    const JUMP_POWER = -10;
-    
-    // Создание платформ
-    function createPlatform(x, y, width=60) {
-        return { x: x, y: y, width: width, height: 12, color: '#8B5A2B' };
-    }
-    
-    function initGame() {
-        player = { x: W/2, y: H-100, width: 20, height: 20, vy: 0, radius: 10 };
-        score = 0;
-        gameOver = false;
-        cameraY = 0;
-        document.getElementById('score').innerText = 'СЧЕТ: 0';
-        
-        platforms = [];
-        // Стартовые платформы
-        for(let i = 0; i < 6; i++) {
-            let x = 20 + Math.random() * (W - 80);
-            let y = H - 50 - i * 80;
-            platforms.push(createPlatform(x, y, 50 + Math.random() * 40));
+    (function(){
+        // ----- РАЗМЕРЫ -----
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const W = 400, H = 600;
+
+        // ----- ПАРАМЕТРЫ ИГРЫ -----
+        let gameRunning = true;
+        let score = 0;
+        let crystals = 0;
+        let bestScore = localStorage.getItem('doodleBest') ? parseInt(localStorage.getItem('doodleBest')) : 0;
+        document.getElementById('bestDisplay').innerText = 'РЕКОРД: ' + bestScore;
+        document.getElementById('crystalDisplay').innerText = 'КРИСТАЛЛЫ: ' + crystals;
+
+        // ----- ПЕРСОНАЖ (шарик) -----
+        const BALL_RADIUS = 14;
+        let doodle = {
+            x: W/2 - BALL_RADIUS,
+            y: H - 80,
+            vx: 0,
+            vy: 0
+        };
+        // Для смены выражения лица
+        let faceExpression = 0; // 0=нейтрал,1=улыбка,2=грусть,3=удивление
+        let frameCounter = 0;
+
+        // ----- ПЛАТФОРМЫ -----
+        const PLATFORM_W = 55;
+        const PLATFORM_H = 12;
+        let platforms = [];
+
+        // ----- КРИСТАЛЛЫ -----
+        let crystalList = [];
+        let lastScoreMilestone = 0;
+
+        // ----- УПРАВЛЕНИЕ -----
+        let leftPressed = false;
+        let rightPressed = false;
+        const MOVE_SPEED = 4.2;
+
+        // ----- ФИЗИКА -----
+        const GRAVITY = 0.45;
+        const JUMP_POWER = -12.5;
+
+        // ----- КАМЕРА -----
+        let cameraY = 0;
+
+        function updateUI(){
+            document.getElementById('scoreDisplay').innerText = 'СЧЕТ: ' + Math.floor(score);
+            document.getElementById('crystalDisplay').innerText = 'КРИСТАЛЛЫ: ' + crystals;
         }
-    }
-    
-    // Обновление камеры
-    function updateCamera() {
-        if(player.y - cameraY < H * 0.3) {
-            cameraY = player.y - H * 0.3;
-        }
-        if(player.y - cameraY > H - 50) {
-            cameraY = player.y - H + 50;
-        }
-        if(cameraY < 0) cameraY = 0;
-    }
-    
-    // Физика и столкновения
-    function updateGame() {
-        if(gameOver) return;
-        
-        // Горизонтальное движение
-        if(moveLeft) player.x -= playerSpeed;
-        if(moveRight) player.x += playerSpeed;
-        player.x = Math.max(player.radius, Math.min(W - player.radius, player.x));
-        
-        // Гравитация
-        player.vy += GRAVITY;
-        player.y += player.vy;
-        
-        let onPlatform = false;
-        for(let p of platforms) {
-            let worldY = p.y - cameraY;
-            if(player.vy >= 0 && 
-               player.y + player.radius >= worldY && 
-               player.y - player.radius <= worldY + p.height &&
-               player.x + player.radius > p.x && 
-               player.x - player.radius < p.x + p.width) {
-                
-                player.y = worldY - player.radius;
-                player.vy = JUMP_POWER;
-                onPlatform = true;
-                
-                // Очки за новую платформу
-                if(p.y < cameraY + H) {
-                    score++;
-                    document.getElementById('score').innerText = `СЧЕТ: ${score}`;
-                    p.y = -100; // убираем, чтобы не давало бесконечно
-                }
-                break;
+
+        function saveBest(){
+            if(score > bestScore){
+                bestScore = score;
+                localStorage.setItem('doodleBest', bestScore);
+                document.getElementById('bestDisplay').innerText = 'РЕКОРД: ' + bestScore;
             }
         }
-        
-        // Если упал
-        if(player.y - player.radius > H) {
-            gameOver = true;
-            tg.sendData(JSON.stringify({ score: score, game_over: true }));
-            return;
+
+        function random(min, max){
+            return Math.floor(Math.random() * (max - min + 1) + min);
         }
-        
-        // Генерация платформ сверху
-        let highestPlatformY = Math.min(...platforms.map(p => p.y));
-        while(highestPlatformY > cameraY - 200) {
-            let newY = highestPlatformY - 80;
-            let newX = 20 + Math.random() * (W - 80);
-            platforms.push(createPlatform(newX, newY, 50 + Math.random() * 50));
-            highestPlatformY = newY;
-        }
-        
-        // Удаление ушедших вниз
-        platforms = platforms.filter(p => p.y > cameraY - 300);
-        
-        updateCamera();
-    }
-    
-    // Отрисовка
-    function draw() {
-        ctx.clearRect(0, 0, W, H);
-        
-        // Небо градиент
-        let grad = ctx.createLinearGradient(0, 0, 0, H);
-        grad.addColorStop(0, '#87CEEB');
-        grad.addColorStop(1, '#E0F6FF');
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, W, H);
-        
-        // Платформы
-        for(let p of platforms) {
-            let y = p.y - cameraY;
-            if(y > H || y + p.height < 0) continue;
-            ctx.fillStyle = p.color;
-            ctx.shadowBlur = 4;
-            ctx.fillRect(p.x, y, p.width, p.height);
-            ctx.fillStyle = '#5D3A1A';
-            ctx.fillRect(p.x, y, p.width, 3);
-        }
-        ctx.shadowBlur = 0;
-        
-        // Игрок (круглый)
-        ctx.fillStyle = '#FF4444';
-        ctx.beginPath();
-        ctx.arc(player.x, player.y, player.radius, 0, Math.PI*2);
-        ctx.fill();
-        ctx.fillStyle = 'white';
-        ctx.beginPath();
-        ctx.arc(player.x-3, player.y-3, 2, 0, Math.PI*2);
-        ctx.fill();
-        
-        // Тень игрока
-        ctx.fillStyle = 'rgba(0,0,0,0.3)';
-        ctx.beginPath();
-        ctx.ellipse(player.x, player.y+5, player.radius-2, 4, 0, 0, Math.PI*2);
-        ctx.fill();
-        
-        if(gameOver) {
-            ctx.font = 'bold 24px monospace';
-            ctx.fillStyle = 'black';
-            ctx.shadowBlur = 0;
-            ctx.fillText('GAME OVER', W/2-80, H/2);
-            ctx.font = '16px monospace';
-            ctx.fillStyle = 'white';
-            ctx.fillText('Нажмите "Закрыть" и /start заново', W/2-130, H/2+40);
-        }
-    }
-    
-    // Управление с клавиатуры (ПК)
-    window.addEventListener('keydown', (e) => {
-        if(e.key === 'ArrowLeft') moveLeft = true;
-        if(e.key === 'ArrowRight') moveRight = true;
-    });
-    window.addEventListener('keyup', (e) => {
-        if(e.key === 'ArrowLeft') moveLeft = false;
-        if(e.key === 'ArrowRight') moveRight = false;
-    });
-    
-    // Управление касанием (телефон)
-    canvas.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        let rect = canvas.getBoundingClientRect();
-        let touchX = (e.touches[0].clientX - rect.left) * (W / rect.width);
-        if(touchX < W/2) moveLeft = true;
-        else moveRight = true;
-    });
-    canvas.addEventListener('touchend', () => {
-        moveLeft = false;
-        moveRight = false;
-    });
-    
-    // Гироскоп (наклон)
-    function requestOrientation() {
-        if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-            // iOS
-            canvas.addEventListener('click', () => {
-                DeviceOrientationEvent.requestPermission()
-                    .then(response => {
-                        if (response === 'granted') {
-                            window.addEventListener('deviceorientation', handleOrientation);
-                        }
-                    })
-                    .catch(console.error);
+
+        // ----- ГЕНЕРАЦИЯ ПЛАТФОРМ -----
+        function generateInitialPlatforms(){
+            platforms = [];
+            platforms.push({
+                x: W/2 - PLATFORM_W/2,
+                y: H - 40,
+                w: PLATFORM_W,
+                h: PLATFORM_H
             });
-        } else {
-            window.addEventListener('deviceorientation', handleOrientation);
+            let lastY = H - 40;
+            for(let i = 0; i < 15; i++){
+                let gap = random(45, 80);
+                let newY = lastY - gap;
+                let newX = random(15, W - PLATFORM_W - 15);
+                platforms.push({
+                    x: newX,
+                    y: newY,
+                    w: PLATFORM_W,
+                    h: PLATFORM_H
+                });
+                lastY = newY;
+            }
         }
-    }
-    
-    function handleOrientation(e) {
-        let gamma = e.gamma; // -90..90
-        if(gamma) {
-            let speed = gamma / 20; // примерно от -4 до 4
-            player.x += speed;
-            player.x = Math.max(player.radius, Math.min(W - player.radius, player.x));
+
+        function addPlatformAbove(){
+            let topY = Math.min(...platforms.map(p => p.y));
+            let gap = random(45, 80);
+            let newY = topY - gap;
+            let newX = random(15, W - PLATFORM_W - 15);
+            platforms.push({
+                x: newX,
+                y: newY,
+                w: PLATFORM_W,
+                h: PLATFORM_H
+            });
         }
-    }
-    
-    requestOrientation();
-    
-    // Анимация
-    function gameLoop() {
-        updateGame();
-        draw();
-        requestAnimationFrame(gameLoop);
-    }
-    
-    initGame();
-    gameLoop();
-    
-    // Сообщаем Telegram, что приложение готово
-    tg.ready();
+
+        function removeLowPlatforms(){
+            let threshold = cameraY + H + 150;
+            platforms = platforms.filter(p => p.y < threshold);
+        }
+
+        // ----- КРИСТАЛЛЫ -----
+        function trySpawnCrystalOnScoreIncrease(newScore){
+            let milestone = Math.floor(newScore / 50);
+            let lastMilestone = Math.floor(lastScoreMilestone / 50);
+            if(milestone > lastMilestone){
+                let yPos = cameraY + random(50, H - 50);
+                let xPos = random(20, W - 20);
+                crystalList.push({
+                    x: xPos,
+                    y: yPos,
+                    w: 12,
+                    h: 12,
+                    collected: false
+                });
+            }
+            lastScoreMilestone = newScore;
+        }
+
+        function updateCrystals(){
+            for(let i=0; i<crystalList.length; i++){
+                let c = crystalList[i];
+                // Проверка столкновения с шариком (круг)
+                let ballCenterX = doodle.x + BALL_RADIUS;
+                let ballCenterY = doodle.y + BALL_RADIUS;
+                let crystalCenterX = c.x + c.w/2;
+                let crystalCenterY = c.y + c.h/2;
+                let dx = ballCenterX - crystalCenterX;
+                let dy = ballCenterY - crystalCenterY;
+                let dist = Math.sqrt(dx*dx + dy*dy);
+                if(!c.collected && dist < BALL_RADIUS + 6){
+                    c.collected = true;
+                    crystals++;
+                    score += 10;
+                    updateUI();
+                    saveBest();
+                }
+            }
+            crystalList = crystalList.filter(c => !c.collected && c.y > cameraY - 100 && c.y < cameraY + H + 100);
+        }
+
+        // ----- ОСНОВНАЯ ЛОГИКА -----
+        function updateGame(){
+            if(!gameRunning) return;
+
+            // Горизонтальное движение
+            if(leftPressed) doodle.vx = -MOVE_SPEED;
+            else if(rightPressed) doodle.vx = MOVE_SPEED;
+            else doodle.vx = 0;
+            doodle.x += doodle.vx;
+            if(doodle.x + BALL_RADIUS*2 < 0) doodle.x = W;
+            if(doodle.x > W) doodle.x = -BALL_RADIUS*2;
+
+            // Вертикаль
+            doodle.vy += GRAVITY;
+            doodle.y += doodle.vy;
+
+            // Столкновение с платформами (прямоугольными)
+            if(doodle.vy > 0){
+                for(let p of platforms){
+                    // Шарик сталкивается с платформой, если его нижняя часть касается
+                    let ballBottom = doodle.y + BALL_RADIUS*2;
+                    if(ballBottom > p.y && ballBottom - doodle.vy <= p.y + 5 &&
+                       doodle.x + BALL_RADIUS*2 > p.x && doodle.x < p.x + p.w){
+                        doodle.vy = JUMP_POWER;
+                        doodle.y = p.y - BALL_RADIUS*2;
+                        break;
+                    }
+                }
+            }
+
+            // Камера
+            let targetCamera = (doodle.y + BALL_RADIUS) - H/2;
+            cameraY = cameraY * 0.92 + targetCamera * 0.08;
+
+            // Счёт за высоту (центр шарика)
+            let height = -(doodle.y + BALL_RADIUS);
+            let newScore = Math.floor(height / 10);
+            if(newScore > score){
+                score = newScore;
+                updateUI();
+                if(score > bestScore) saveBest();
+                trySpawnCrystalOnScoreIncrease(score);
+            }
+
+            // Проигрыш
+            if(doodle.y + BALL_RADIUS*2 > cameraY + H + 80){
+                gameRunning = false;
+                saveBest();
+                return;
+            }
+
+            // Генерация платформ
+            let highestPlatform = Math.min(...platforms.map(p => p.y));
+            if(highestPlatform > cameraY - 250){
+                addPlatformAbove();
+            }
+            removeLowPlatforms();
+
+            updateCrystals();
+
+            // Смена выражения лица каждые 30 кадров (примерно раз в полсекунды)
+            frameCounter++;
+            if(frameCounter >= 30){
+                frameCounter = 0;
+                faceExpression = random(0, 3); // 0-3
+            }
+        }
+
+        // ----- ОТРИСОВКА ШАРИКА С ВЫРАЖЕНИЕМ -----
+        function drawBall(x, y, r, expression){
+            ctx.save();
+            // Сам шарик
+            ctx.beginPath();
+            ctx.arc(x + r, y + r, r, 0, Math.PI*2);
+            ctx.fillStyle = "#4a4ae0";
+            ctx.fill();
+            ctx.strokeStyle = "#2c2c9e";
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+            // Глаза (белки)
+            ctx.fillStyle = "white";
+            ctx.beginPath();
+            ctx.arc(x + r - 5, y + r - 5, 3, 0, Math.PI*2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(x + r + 5, y + r - 5, 3, 0, Math.PI*2);
+            ctx.fill();
+            // Зрачки
+            ctx.fillStyle = "black";
+            ctx.beginPath();
+            ctx.arc(x + r - 5, y + r - 5, 1.5, 0, Math.PI*2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(x + r + 5, y + r - 5, 1.5, 0, Math.PI*2);
+            ctx.fill();
+
+            // Рот в зависимости от выражения
+            ctx.beginPath();
+            ctx.strokeStyle = "black";
+            ctx.lineWidth = 2;
+            switch(expression){
+                case 1: // улыбка
+                    ctx.arc(x + r, y + r + 2, 8, 0.1, Math.PI - 0.1);
+                    ctx.stroke();
+                    break;
+                case 2: // грусть
+                    ctx.arc(x + r, y + r + 5, 8, Math.PI + 0.1, 2*Math.PI - 0.1);
+                    ctx.stroke();
+                    break;
+                case 3: // удивление (круглый рот)
+                    ctx.arc(x + r, y + r + 3, 4, 0, Math.PI*2);
+                    ctx.fillStyle = "black";
+                    ctx.fill();
+                    break;
+                default: // нейтральное (прямая линия)
+                    ctx.moveTo(x + r - 5, y + r + 3);
+                    ctx.lineTo(x + r + 5, y + r + 3);
+                    ctx.stroke();
+            }
+            ctx.restore();
+        }
+
+        function draw(){
+            ctx.clearRect(0, 0, W, H);
+            ctx.save();
+            ctx.translate(0, -cameraY);
+
+            // Фон
+            ctx.fillStyle = "#87CEEB";
+            ctx.fillRect(0, cameraY-200, W, H+400);
+            ctx.fillStyle = "rgba(255,255,240,0.6)";
+            for(let i=0;i<5;i++){
+                ctx.beginPath();
+                ctx.ellipse(50 + i*80 + Math.sin(Date.now()*0.0008 + i)*15, cameraY + 70 + i*40, 35, 25, 0, 0, Math.PI*2);
+                ctx.fill();
+            }
+
+            // Платформы
+            for(let p of platforms){
+                if(p.y + p.h < cameraY - 50 || p.y > cameraY + H + 50) continue;
+                ctx.fillStyle = "#68c45e";
+                ctx.fillRect(p.x, p.y, p.w, p.h);
+                ctx.fillStyle = "#2e7d32";
+                ctx.fillRect(p.x+5, p.y-3, p.w-10, 5);
+                ctx.fillStyle = "#5d4037";
+                ctx.fillRect(p.x, p.y+3, p.w, 3);
+            }
+
+            // Кристаллы
+            for(let c of crystalList){
+                if(c.y + c.h < cameraY - 50 || c.y > cameraY + H + 50) continue;
+                ctx.fillStyle = "#ffd966";
+                ctx.beginPath();
+                ctx.arc(c.x+6, c.y+6, 7, 0, Math.PI*2);
+                ctx.fill();
+                ctx.fillStyle = "#ffaa33";
+                ctx.beginPath();
+                ctx.arc(c.x+6, c.y+6, 4, 0, Math.PI*2);
+                ctx.fill();
+                ctx.fillStyle = "gold";
+                ctx.font = "bold 10px monospace";
+                ctx.fillText("+", c.x+4, c.y+9);
+            }
+
+            // Шарик
+            drawBall(doodle.x, doodle.y, BALL_RADIUS, faceExpression);
+
+            ctx.restore();
+
+            if(!gameRunning){
+                ctx.font = "bold 28px monospace";
+                ctx.fillStyle = "white";
+                ctx.shadowColor = "black";
+                ctx.fillText("GAME OVER", W/2-95, H/2-40);
+                ctx.font = "bold 16px monospace";
+                ctx.fillStyle = "#ffdb7e";
+                ctx.fillText("СЧЕТ: " + Math.floor(score), W/2-40, H/2+20);
+            }
+        }
+
+        // ----- УПРАВЛЕНИЕ -----
+        function handleKeyDown(e){
+            let key = e.key;
+            if(key === 'ArrowLeft' || key === 'a') { leftPressed = true; e.preventDefault();}
+            if(key === 'ArrowRight' || key === 'd') { rightPressed = true; e.preventDefault();}
+        }
+        function handleKeyUp(e){
+            let key = e.key;
+            if(key === 'ArrowLeft' || key === 'a') { leftPressed = false; e.preventDefault();}
+            if(key === 'ArrowRight' || key === 'd') { rightPressed = false; e.preventDefault();}
+        }
+
+        let touchActive = false;
+        function onTouchStart(e){
+            e.preventDefault();
+            let rect = canvas.getBoundingClientRect();
+            let touchX = e.touches[0].clientX - rect.left;
+            if(touchX < W/2){
+                leftPressed = true;
+                rightPressed = false;
+            } else {
+                rightPressed = true;
+                leftPressed = false;
+            }
+            touchActive = true;
+        }
+        function onTouchMove(e){
+            e.preventDefault();
+            if(!touchActive) return;
+            let rect = canvas.getBoundingClientRect();
+            let touchX = e.touches[0].clientX - rect.left;
+            if(touchX < W/2){
+                leftPressed = true;
+                rightPressed = false;
+            } else {
+                rightPressed = true;
+                leftPressed = false;
+            }
+        }
+        function onTouchEnd(e){
+            e.preventDefault();
+            leftPressed = false;
+            rightPressed = false;
+            touchActive = false;
+        }
+
+        function restartGame(){
+            gameRunning = true;
+            score = 0;
+            crystals = 0;
+            lastScoreMilestone = 0;
+            updateUI();
+            doodle = {
+                x: W/2 - BALL_RADIUS,
+                y: H - 80,
+                vx: 0,
+                vy: 0
+            };
+            cameraY = 0;
+            crystalList = [];
+            generateInitialPlatforms();
+            leftPressed = false;
+            rightPressed = false;
+            frameCounter = 0;
+            faceExpression = 0;
+        }
+
+        window.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('keyup', handleKeyUp);
+        canvas.addEventListener('touchstart', onTouchStart, {passive: false});
+        canvas.addEventListener('touchmove', onTouchMove, {passive: false});
+        canvas.addEventListener('touchend', onTouchEnd);
+        document.getElementById('restartButton').addEventListener('click', restartGame);
+
+        generateInitialPlatforms();
+
+        function gameLoop(){
+            if(gameRunning) updateGame();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+        gameLoop();
+    })();
 </script>
 </body>
 </html>
